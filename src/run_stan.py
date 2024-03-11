@@ -14,19 +14,6 @@ import gp_kron_stan
 import gp_kron_stan_simple
 
 
-# TODO
-#  - Create simulation data to test if we're not hallucinating significant effects in noise.
-#  - Run a comparison on the peaks?
-#     Might be better to do a custom analysis, running a weighted average over the frequency and including a measure
-#     of error due to the width of the peak.
-#  - Add in the non-simplified version.
-#  - Setup in such a way that we can run both wavelet and then stan in one run.
-#  - Fast check of both wavelet and stan so that errors are reported before any long-running steps.
-#  - Easier way of describing equations, maybe in horiz and vert lists that are turned into a grid.
-#    See "Nikhil/stan.toml" for some ideas in the comments. Also titles with good defaults so that
-#    on a first pass titles don't have to be specified.
-
-
 def main():
     pl.Config.set_tbl_rows(1000)
     pl.Config.set_tbl_cols(100)
