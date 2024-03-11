@@ -1,0 +1,79 @@
+# - Formulas follow the formulaic specification:
+#    https://matthewwardrop.github.io/formulaic/formulas/
+#    https://matthewwardrop.github.io/formulaic/guides/grammar/
+#    https://matthewwardrop.github.io/formulaic/guides/transforms/
+# - Available convenience functions in formulas:
+#    - log = logarithmic transformation
+#    - center = subtract the mean
+#    - scale = subtract the mean and divide by the standard deviation
+#    - C = categorical encoding of numerical values
+
+[data]
+input_path = "simulated"  # location where the wavelet results are stored
+filenames = "File"
+
+[design]
+population.mean     = 'Period * Region * Cohort + Age + scale(log(hours))'
+population.variance = 'Period * Region * Cohort + Age + scale(log(hours)) + scale(log(nchan))'
+group.mean          = ['Period * Region | Patient']
+dims = [1]
+
+[priors]
+tau_beta = 'gamma(2, 1)'
+tau_gamma = 'gamma(2, 1)'
+lambda_beta = 'lognormal(1.4, 1)'
+lambda_gamma = 'lognormal(1.4, 1)'
+lambda_mu = 'lognormal(-0.7, 1)'
+lambda_noise = 'lognormal(-1.4, 1)'
+
+[stan]
+seed = 2024_02_25
+chains = 8
+iter_warmup = 500
+iter_sampling = 500
+adapt_delta = 0.9
+max_treedepth = 15
+inits = 0
+
+# This section prepares default values for individual plots specified in [[plot]] items.
+# If a real-valued constant is omitted, a simple average over all units will be used.
+# All categorically-valued constants must be given.
+[defaults.plot]
+label.ub = {Period='Baseline'  , Region='Upper'}
+label.u1 = {Period='Treatment1', Region='Upper'}
+label.u2 = {Period='Treatment2', Region='Upper'}
+label.lb = {Period='Baseline'  , Region='Lower'}
+label.l1 = {Period='Treatment1', Region='Lower'}
+label.l2 = {Period='Treatment2', Region='Lower'}
+constants.hours = 0.5
+constants.Age = 60
+alpha_level = 0.05
+dpi = 150
+
+[[plot]]
+filename = "healthy.png"
+constants.Cohort = 'Healthy'
+equations = [
+    ['ub     ', 'u1     ', 'u1 - ub            '],
+    ['     lb', '     l1', '           l1 - lb '],
+    ['ub - lb', 'u1 - l1', 'u1 - ub - (l1 - lb)'],
+]
+titles = [
+    ['Upper baseline'        , 'Upper treatment1'   , 'Upper Treatment 1 effect'     ],
+    ['Lower baseline'        , 'Lower treatment1'   , 'Lower Treatment 1 effect'     ],
+    ['Baseline region effect', 'Lower region effect', 'Region and Treatment 1 effect'],
+]
+
+[[plot]]
+filename = "patient.png"
+constants.Cohort = 'Patient'
+equations = [
+    ['ub     ', 'u1     ', 'u1 - ub            '],
+    ['     lb', '     l1', '           l1 - lb '],
+    ['ub - lb', 'u1 - l1', 'u1 - ub - (l1 - lb)'],
+]
+titles = [
+    ['Upper baseline'        , 'Upper treatment1'   , 'Upper Treatment 1 effect'     ],
+    ['Lower baseline'        , 'Lower treatment1'   , 'Lower Treatment 1 effect'     ],
+    ['Baseline region effect', 'Lower region effect', 'Region and Treatment 1 effect'],
+]

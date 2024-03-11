@@ -1,0 +1,13 @@
+# Do not store patient data!
+studies/
+
+# Python
+*.py[cod]
+__pycache__/
+.pytest_cache/
+
+# IDE
+.idea
+.DS_Store
+.vscode
+.devcontainer

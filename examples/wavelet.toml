@@ -1,0 +1,89 @@
+# Notes
+# =====
+#
+# Time columns need to be either in "HH:MM:SS" or "Hh Mm Ss" format.
+# e.g. to represent 2 hours, 47 minutes, and 13 seconds, use "02:47:13" or better "2h 47m 13s".
+# Use the following Excel formula to work around Excel's absolutely horrendous "correction" of
+# user input into Excel's disasterously wrong interpretations of times and dates from text.
+# Replace this "A1" for the source time column in your spreadsheet.
+#          ↓                           If you need more than 0 digits of sub-second precision then replace this
+#          ↓                                                                                                ↓
+# =LET(ts,A1*24*60*60,h,FLOOR(ts/60/60,1),m,FLOOR((ts-h*60)/60,1),CONCAT(h,"h ",m,"m ",ROUND(ts-h*60*60-m*60,0),"s"))
+#             \    /
+#              This part converts from Excel's implict fractional-days representation of times into seconds,
+#              so if you have something like "2:37" to represent 2 minutes and 37 seconds, Excel treats this
+#              as 2 hours and 37 minutes (actually it treats it as 2:37am), so you can convert the formula
+#              to 24*60 instead of 24*60*60 to get the correct measure of time.
+# Then do a copy paste-values of the result into a new column.
+#
+# Channels need to be in "start-end" inclusive format, e.g. "5-17" includes channels 5, 17 and
+# all of the channels in between.
+#
+# Each unit will have an associated time and channel range, with the following
+# variables implicitly defined if it does not already exist:
+#   nchan = the number of channels, e.g. 13 for channels 5-17.
+#   hours = duration of the time period in fractional hours, e.g. 1.5 for 1 hour and 30 minutes.
+#   minutes = duration of the time period in fractional minutes, e.g. 1.5 for 1 minute and 30 seconds.
+
+[data]
+table_filename = 'table.xlsx'  # location of the metadata file
+input_path = 'data'  # location of the manometry txt files
+time_columns = ['Start_base', 'Finish_base', 'Start_1', 'Finish_1', 'Start_2', 'Finish_2']
+filenames_column = 'File'  # variable that specifies the filenames (omitting the .txt extension)
+unit_id_column = 'unit_id'  # column name that will be generated to hold unit identifiers
+
+# TODO Insert sim data section which can replace [data] for simulated data.
+#  Sim would probably use [wavelet] section to define resolution, and [time] and [chan]
+#  sections to create additional variables. The [preproc] section could probably be omitted for sim.
+#  This may be too complex to easily fit into such a toml, and we could specify within python if needed.
+#  e.g.:
+#    [sim]
+#    seed = 2024_02_25
+#    population.mean     = 'Period * Region * Cohort + Age + scale(log(hours))'
+#    population.variance = 'Period * Region * Cohort + Age + scale(log(hours)) + scale(log(nchan))'
+#    group.mean          = ['Period * Region | Patient']
+#    Cohort.levels = ['Healthy', 'Patient']
+#    Age.dist = 'lognormal(60, 10)'
+#    hyper.tau_beta = 'gamma(2, 1)'
+#    hyper.tau_gamma = 'gamma(2, 1)'
+#    hyper.lambda_beta = 'lognormal(1.4, 1)'
+#    hyper.lambda_gamma = 'lognormal(1.4, 1)'
+#    hyper.lambda_mu = 'lognormal(-0.7, 1)'
+#    hyper.lambda_noise = 'lognormal(-1.4, 1)'
+#    unit_id_column = 'unit_id'
+#    dims = [1, 2]  # 2d dim could also need seperate phase lambdas?
+
+[time]
+name = 'Period'
+level.Baseline   = ['Start_base', 'Finish_base']
+level.Treatment1 = ['Start_1'   , 'Finish_1']
+level.Treatment2 = ['Start_2'   , 'Finish_2']
+
+[chan]
+name = 'Region'
+level = ['Upper', 'Lower']
+
+[preproc]
+# TODO
+# baseline removal methods:
+#   'gauss': Gaussian smoothed
+#   'ema': exponential moving average
+baseline_removal.method = 'gauss'
+baseline_removal.iters = 10
+baseline_removal.sigma = 10  # in seconds
+# synchronous anomaly removal is performed over:
+#  'none':     not performed
+#  'all':      over all channels in the recording
+#  'joint':    jointly over the combined channels specified via the variable given in `chan`
+#  'seperate': seperately for each value in the variable given in `chan`
+#sync_rem = 'joint'  # joint only supported for now
+sync_rem = 'none'
+
+[wavelet]
+freq_min_cpm = '1/8'
+freq_max_cpm = 8
+intervals_per_octave = 4
+family = 'Morse'
+params = {beta = 1.58174, gam = 3}
+mesaclip_min_cycles = 2
+log2_pres = true
