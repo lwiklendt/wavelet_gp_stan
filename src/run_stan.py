@@ -34,7 +34,7 @@ def main():
     config = tomllib.loads(config_filename.read_text(encoding='utf-8'))
     os.chdir(config_filename.parent)
 
-    # TODO use default output path
+    # Read input and output path, or if no output path then set default output to the name of the config file.
     input_path = Path(config['data']['input_path'])
     if 'outpath' in config['data']:
         output_path = Path(config['data']['output_path'])
@@ -58,7 +58,10 @@ def main():
     # Formulas.
     fe_mu_formula = config['design']['population']['mean']
     fe_noise_formula = config['design']['population']['variance']
-    re_mu_formulas = config['design']['group']['mean']
+    if 'group' in config['design']:
+        re_mu_formulas = config['design']['group']['mean']
+    else:
+        re_mu_formulas = None
 
     # Read table written in wavelet step.
     df = pl.read_csv(input_path / 'table.csv')
@@ -73,10 +76,11 @@ def main():
     df_pandas = df.to_pandas()
     variables = formulaic.model_matrix(fe_mu_formula, df_pandas).model_spec.variables_by_source['data']
     variables |= formulaic.model_matrix(fe_noise_formula, df_pandas).model_spec.variables_by_source['data']
-    for formula in re_mu_formulas:
-        spec = formulaic.model_matrix(formula, df_pandas).model_spec
-        variables |= spec[0].variables
-        variables |= spec[1].variables
+    if re_mu_formulas:
+        for formula in re_mu_formulas:
+            spec = formulaic.model_matrix(formula, df_pandas).model_spec
+            variables |= spec[0].variables
+            variables |= spec[1].variables
     del df_pandas
 
     # # Drop null entries for all variables that appear in the formulas.
@@ -89,13 +93,21 @@ def main():
     #         nulls |= v_nulls
     # df = df.filter(~nulls)
 
-    # Filter based on design.
+    # Filter (keep) based on design.
     if 'filter' in config['design']:
         for variable, value in config['design']['filter'].items():
             if type(value) is list:
                 df = df.filter(pl.col(variable).is_in(value))
             else:
                 df = df.filter(pl.col(variable) == value)
+
+    # Remove (filter-out).
+    if 'remove' in config['design']:
+        for variable, value in config['design']['remove'].items():
+            if type(value) is list:
+                df = df.filter(pl.col(variable).is_in(value).not_())
+            else:
+                df = df.filter(pl.col(variable) != value)
 
     # Add index column to table.
     idx_uuid = str(uuid.uuid4()).replace('-', '')  # Removing '-' so that eval works.
@@ -223,13 +235,17 @@ def main():
             print('')
 
             eqns = plot_config['equations']
-            titles = plot_config['titles']
+            if 'titles' in plot_config:
+                titles = plot_config['titles']
+            else:
+                titles = [[elt.strip() for elt in row] for row in eqns]
             peaks = plot_config.get('peaks', False)
 
             # Plot and save.
             print('  rendering')
             fig = model.plot(freqs_cpm_hr, decs, eqns, titles=titles, force_diff=False,  # TODO implement force_diff
-                             icpt_tx=icpt_tx, icpt_value_label=icpt_label, alpha=alpha, peaks=peaks)
+                             icpt_tx=icpt_tx, icpt_value_label=icpt_label, alpha=alpha, peaks=peaks,
+                             suptitle=config_filename)
             fig.savefig(filename, dpi=plot_config.get('dpi', 150))
 
 

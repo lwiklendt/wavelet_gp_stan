@@ -224,7 +224,6 @@ class GPModel(ABC):
     def _plot_axes(self, ax, samples, freq_cpm, icpt=False, vmin=None, vmax=None, alpha=0.05, value_label=None):
         pass
 
-    @abstractmethod
     def _plot_peaks_axes(self, ax, samples, freq_cpm, icpt, vmin, vmax, alpha=0.05, value_label=None):
         pass
 
@@ -277,7 +276,7 @@ class GPModel(ABC):
 
     def plot(self, freq_cpm, decs, eqns, titles=None, icpt_tx=None, diff_tx=None, alpha=0.05, simplify_coeffs=True,
              icpt_value_label=None, diff_value_label='Ratio', offset_eta=None, force_diff=False,
-             col_width=None, row_height=None, peaks=False):
+             col_width=None, row_height=None, peaks=False, suptitle=None):
         """
         Plot results.
         @param freq_cpm: frequency in log2 cpm.
@@ -298,6 +297,7 @@ class GPModel(ABC):
         @param col_width: width in inches per column, or None for the default of 3.5 for 1d and 4.2 for 2d plots.
         @param row_height: height in inches per row, or None for the default of 3.35.
         @param peaks: True to plot peaks-only version, False to print usual full-frequency version.
+        @param suptitle: Overall title for the figure.
         @return: matplotlib figure
         """
 
@@ -462,6 +462,9 @@ class GPModel(ABC):
             else:
                 self._plot_axes(ax, samples, freq_cpm, icpt=is_icpt, vmin=vmin, vmax=vmax, alpha=alpha,
                                 value_label=value_label)
+
+        if suptitle is not None:
+            fig.suptitle(suptitle, y=0.99)
 
         fig.tight_layout()
         return fig
