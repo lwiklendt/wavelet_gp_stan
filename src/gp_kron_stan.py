@@ -205,7 +205,6 @@ class GPModel(ABC):
     def _plot_axes(self, ax, samples, freq_cpm, icpt=False, vmin=None, vmax=None, alpha=0.05, value_label=None):
         pass
 
-    @abstractmethod
     def _plot_peaks_axes(self, ax, samples, freq_cpm, icpt, vmin, vmax, alpha=0.05, value_label=None):
         pass
 

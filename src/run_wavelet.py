@@ -314,6 +314,33 @@ def assemble_table(config: dict, df: pl.DataFrame) -> AssembledTable:
     return AssembledTable(df=df, chan_value_column=chan_value_column, time_value_column=time_value_column)
 
 
+def find_peaks(f, fp, freqs_cpm, phase_centres, wavelet_params):
+
+    # Subset the frequency to the desired range.
+    peak_f_range = wavelet_params.get('peak_f_range', [-np.inf, np.inf])
+    sel = (freqs_cpm >= peak_f_range[0]) & (freqs_cpm <= peak_f_range[1])
+    f = f[sel]
+    fp = fp[sel, :]
+    freqs_cpm = freqs_cpm[sel]
+
+    f_i = np.argmax(f)
+    fp_i, fp_j = np.unravel_index(np.argmax(fp), fp.shape)  # i = freq_idx, j = phase_idx
+    return (
+        freqs_cpm[f_i],       # 1D peak frequency
+        f[f_i],               # 1D peak power
+        freqs_cpm[fp_i],      # 2D peak frequency
+        phase_centres[fp_j],  # 2D peak phase
+        fp[fp_i, fp_j]        # 2D peak power
+    )
+
+
+def map_to_time_seconds(v) -> float:
+    if v[0] is None or v[1] is None:
+        return np.nan
+    else:
+        return v[1] - v[0]
+
+
 def main():
     # pl.Config.set_tbl_rows(100)
     pl.Config.set_tbl_cols(100)
@@ -356,6 +383,10 @@ def main():
     table = assemble_table(config, df)
     df = table.df
     unit_id_col = config['data']['unit_id_column']
+
+    # Researchers are non-programmers and so they prefer 1-based end-inclusive indexing by default.
+    chan_one_based_index = config['chan'].get('one_based_index', True)
+    chan_end_inclusive = config['chan'].get('end_inclusive', True)
 
     filename_for_dt = None
     check_dt = None
@@ -409,52 +440,82 @@ def main():
 
     for (data_basename, ), df_recording in df.group_by([config['data']['filenames_column']], maintain_order=True):
 
-        # TODO check that we don't already have values for this.
+        print(f'{unit_i}/{nunits}: {data_basename}:')
 
-        print(f'{unit_i}/{nunits}: computing {data_basename}:')
+        # Delayed loading allows us to skip an already processed recording.
+        def load_recording():
+            # load filename
+            filename = (input_path / data_basename).with_suffix('.txt')
+            t, _, x = data.load_hrm_txt(filename)
 
-        # load filename
-        filename = (input_path / data_basename).with_suffix('.txt')
-        t, _, x = data.load_hrm_txt(filename)
+            diff_t = np.diff(t)
+            dt = np.median(diff_t)
 
-        diff_t = np.diff(t)
-        dt = np.median(diff_t)
+            nonlocal check_dt
+            nonlocal filename_for_dt
+            if check_dt is None:
+                check_dt = dt
+                filename_for_dt = filename
 
-        if check_dt is None:
-            check_dt = dt
-            filename_for_dt = filename
+            # Ensure sample rate is consistent throughout.
+            if (np.min(diff_t) / np.max(diff_t) - 1.) > 1e-6:
+                raise RuntimeError('Inconsistent sampling rate')
 
-        # Ensure sample rate is consistent throughout.
-        if (np.min(diff_t) / np.max(diff_t) - 1.) > 1e-6:
-            raise RuntimeError('Inconsistent sampling rate')
+            # Ensure expected sampling rate.
+            if np.abs(dt / check_dt - 1.0) > 1e-6:
+                raise RuntimeError(f'Time-step in "{filename}" ({dt}) '
+                                   f'inconsistent with that in "{filename_for_dt}" ({check_dt})')
 
-        # Ensure expected sampling rate.
-        if np.abs(dt / check_dt - 1.0) > 1e-6:
-            raise RuntimeError(f'Time-step in "{filename}" ({dt}) '
-                               f'inconsistent with that in "{filename_for_dt}" ({check_dt})')
+            # Ensure no nans.
+            if np.sum(np.isnan(x)) > 0:
+                raise RuntimeError('There are NaNs in the pressures')
 
-        # Ensure no nans.
-        if np.sum(np.isnan(x)) > 0:
-            raise RuntimeError('There are NaNs in the pressures')
+            # pre-process with baseline and synchronous anomaly removal
+            x = data.clean_pressures(x, sigma_samples=blr_sigma/dt, iters=blr_iters, sync_rem=sync_rem)
 
-        # pre-process with baseline and synchronous anomaly removal
-        x = data.clean_pressures(x, sigma_samples=blr_sigma/dt, iters=blr_iters, sync_rem=sync_rem)
+            return dt, t, x
+
+        # Later we test x for None to see if we need to load the data via load_recording()
+        x = None
 
         # For each unit.
         for row in df_recording.rows(named=True):
-            unit_id = row[unit_id_col]
-
             unit_i += 1
-            print(f'{unit_i}/{nunits}:   {unit_id}')
+
+            unit_id = row[unit_id_col]
+            pkl_filename = (output_path / 'data' / unit_id).with_suffix('.pkl')
+
+            # Skip if this unit already exists.
+            if pkl_filename.exists():
+                print(f'{unit_i}/{nunits}:   {unit_id} (already exists as: {pkl_filename})')
+                continue
+
+            # Ensure there is data for this unit.
+            chan_start_end = row[table.chan_value_column]
+            sec_start_end = row[table.time_value_column]
+            if chan_start_end is None or sec_start_end is None:
+                print(f'{unit_i}/{nunits}:   {unit_id} (skipped due to missing data: '
+                      f'{chan_start_end=}, {sec_start_end=})')
+                continue
+            chan_start, chan_end = chan_start_end
+            sec_start, sec_end = sec_start_end
+            if np.any([v is None for v in [chan_start, chan_end, sec_start, sec_end]]):
+                print(f'{unit_i}/{nunits}:   {unit_id} (skipped due to missing data: '
+                      f'{chan_start=}, {chan_end=}, {sec_start=}, {sec_end=})')
+                continue
+            else:
+                print(f'{unit_i}/{nunits}:   {unit_id}')
+
+            # Load the recording if we have not yet done so.
+            if x is None:
+                dt, t, x = load_recording()
 
             # Extract the unit's pressures.
-            chan_start, chan_end = row[table.chan_value_column]  # 1-based end-inclusive indexing
-            sec_start, sec_end = row[table.time_value_column]
             samp_start = np.searchsorted(t, sec_start, side='left')
             samp_end = np.searchsorted(t, sec_end, side='right')
 
             # Ensure chan_start is positive.
-            if chan_start < 1:
+            if chan_start < 1 and chan_one_based_index:
                 raise RuntimeError(f'Unit {unit_id} has chan start at {chan_start}, minimum needs to be 1')
 
             # Ensure we're within recording bounds.
@@ -463,8 +524,19 @@ def main():
             if sec_end > t[-1]:
                 raise RuntimeError(f'Unit {unit_id} has end time at {sec_end}, but max is {t[-1]}')
 
-            # `-1` to switch to 0-based indexing, leaving chan_end alone since we also switch to end exclusive.
-            x_unit = x[(chan_start-1):chan_end, samp_start:samp_end]
+            # Convert from supplied to normal zero-based end-exclusive indexing.
+            match (chan_one_based_index, chan_end_inclusive):
+                case (False, False):
+                    pass  # Standard indexing, nothing to do.
+                case (False, True):
+                    chan_end += 1
+                case (True, False):
+                    chan_start -= 1
+                    chan_end -= 1  # Already end-exclusive, but the 1-based indexing needs to be corrected for.
+                case(True, True):
+                    chan_start -= 1
+
+            x_unit = x[chan_start:chan_end, samp_start:samp_end]
 
             # Compute the wavelet transform.
             scales_s = wavelet.make_scales_s(wavelet_params['intervals_per_octave'], sec_end - sec_start, dt)
@@ -473,18 +545,9 @@ def main():
                               fig_filename=fig_filename, **wavelet_params)
 
             # Calculate peak measures.
-            f_i = np.argmax(f)
-            fp_i, fp_j = np.unravel_index(np.argmax(fp), fp.shape)  # i = freq_idx, j = phase_idx
-            peak_measures[unit_id] = (
-                freqs_cpm[f_i],       # 1D peak frequency
-                f[f_i],               # 1D peak power
-                freqs_cpm[fp_i],      # 2D peak frequency
-                phase_centres[fp_j],  # 2D peak phase
-                fp[fp_i, fp_j]        # 2D peak power
-            )
+            peak_measures[unit_id] = find_peaks(f, fp, freqs_cpm, phase_centres, wavelet_params)
 
             # Pickle result.
-            pkl_filename = (output_path / 'data' / unit_id).with_suffix('.pkl')
             utils.pkl_save((f, fp), pkl_filename)
 
     # Append to table for use in Stan.
@@ -494,25 +557,35 @@ def main():
         print(f'column "nchan" already exists in table, skipping', file=sys.stderr)
     if 'hours' not in df.columns:
         df = df.with_columns(
-            pl.col(table.time_value_column).map_elements(lambda v: (v[1] - v[0]) / 3600).alias('hours'))
+            pl.col(table.time_value_column).map_elements(lambda v: map_to_time_seconds(v) / 3600).alias('hours'))
     else:
         print(f'column "hours" already exists in table, skipping', file=sys.stderr)
     if 'minutes' not in df.columns:
         df = df.with_columns(
-            pl.col(table.time_value_column).map_elements(lambda v: (v[1] - v[0]) / 60).alias('minutes'))
+            pl.col(table.time_value_column).map_elements(lambda v: map_to_time_seconds(v) / 60).alias('minutes'))
     else:
         print(f'column "minutes" already exists in table, skipping', file=sys.stderr)
     df = df.drop([table.chan_value_column, table.time_value_column])
 
-    # Append peak measures.
-    with warnings.catch_warnings():
-        # Polars does not correctly identify the mapping below, so filter the unnecessary warning.
-        warnings.filterwarnings('ignore', category=pl.exceptions.PolarsInefficientMapWarning)
-        for i, label in enumerate(['peak1d_freq', 'peak1d_power', 'peak2d_freq', 'peak2d_phase', 'peak2d_power']):
-            if label not in df.columns:
-                df = df.with_columns(pl.col(unit_id_col).map_elements(lambda u: peak_measures[u][i]).alias(label))
-            else:
-                print(f'column "{label}" already exists in table, skipping', file=sys.stderr)
+    # TODO peak measures are missing for precomputed since we don't pkl peaks.
+    # # Append peak measures.
+    # with warnings.catch_warnings():
+    #     # Polars does not correctly identify the mapping below, so filter the unnecessary warning.
+    #     warnings.filterwarnings('ignore', category=pl.exceptions.PolarsInefficientMapWarning)
+    #     for i, label in enumerate(['peak1d_freq', 'peak1d_power', 'peak2d_freq', 'peak2d_phase', 'peak2d_power']):
+    #         if label not in df.columns:
+    #             df = df.with_columns(pl.col(unit_id_col).map_elements(lambda u: peak_measures[u][i]).alias(label))
+    #         else:
+    #             print(f'column "{label}" already exists in table, skipping', file=sys.stderr)
+
+    # Drop rows which have no processed data.
+    unit_data_exists = df[unit_id_col]
+    unit_exists = unit_data_exists.map_elements(lambda u: (output_path / 'data' / u).with_suffix('.pkl').exists())
+    dropped = df.filter(~unit_exists)
+    if len(dropped) > 0:
+        print(f'dropped non-existing units:')
+        print(dropped)
+    df = df.filter(unit_exists)
 
     # Write table for use in Stan.
     output_table_filename = output_path / 'table.csv'
