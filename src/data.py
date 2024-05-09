@@ -19,9 +19,8 @@ def load_hrm_txt(filename):
     marks = x[:, 1]
     pres = x[:, 2:].T
 
-    # sometimes there is an extra column of NANs at the end, so remove it
-    if np.sum(np.isnan(pres[-1])) == len(times):
-        pres = pres[:-1, :]
+    # sometimes there are extra columns of NANs at the end, so remove them
+    pres = pres[~np.all(np.isnan(pres), axis=1), :]
 
     return times, marks, pres
 
