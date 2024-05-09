@@ -286,17 +286,18 @@ def sample(src_stan_code: str,
     #    but only showing problems such as rhats larger than certain values.
     #  - We would like to ask something like has_problems() and get a bool.
 
+    # Diagnosis.
+    print(f'Diagnosing...', end='')
+    start = datetime.datetime.now()
+    with open(output_dirname / 'diagnosis.txt', 'w') as f:
+        f.write(result.diagnose())
+    print(f'done ({datetime.datetime.now() - start})')
+
     # Overview and args.
     summary = f'sampling started: {sampling_start}\n' \
               f'sampling ended  : {sampling_end}\n' \
               f'sampling elapsed: {sampling_end - sampling_start}\n\n' \
               f'stan_kwargs={pprint.pformat(sample_kwargs)}\n\n'
-
-    # Diagnosis.
-    print(f'Diagnosing...', end='')
-    start = datetime.datetime.now()
-    summary += f'{result.diagnose()}\n\n'
-    print(f'done ({datetime.datetime.now() - start})')
 
     # Variable summary.
     print(f'Summarising variables...', end='')
