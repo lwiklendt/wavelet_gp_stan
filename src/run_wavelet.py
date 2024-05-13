@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 import tomllib
 import uuid
-import warnings
 
 import numpy as np
 import polars as pl
@@ -520,9 +519,11 @@ def main():
 
             # Ensure we're within recording bounds.
             if sec_start < t[0]:
-                raise RuntimeError(f'Unit {unit_id} has start time at {sec_start}, but min is {t[0]}')
+                raise RuntimeError(f'Unit {unit_id} has start time at {sec_start}, but min is {t[0]} '
+                                   f'(diff={t[0] - sec_start})')
             if sec_end > t[-1]:
-                raise RuntimeError(f'Unit {unit_id} has end time at {sec_end}, but max is {t[-1]}')
+                raise RuntimeError(f'Unit {unit_id} has end time at {sec_end}, but max is {t[-1]} '
+                                   f'(diff={sec_end-t[-1]})')
 
             # Convert from supplied to normal zero-based end-exclusive indexing.
             match (chan_one_based_index, chan_end_inclusive):
