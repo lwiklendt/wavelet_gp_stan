@@ -69,7 +69,7 @@ def main():
     # Strip whitespace in String columns. This is a recurring problem in researchers' tables.
     for col in df.columns:
         if df[col].dtype == pl.String:
-            df = df.with_columns(pl.col(col).map_elements(lambda s: s.strip()))
+            df = df.with_columns(pl.col(col).str.strip_chars())
 
     # TODO based on the formulas, plot data at least for the 1d case. Or, should we just plot data in the dryrun?
     # Collect all variables that appear in the formulas.
@@ -200,9 +200,6 @@ def main():
         else:
             icpt_label = 'Power (mmHg²)'
 
-        alpha = 0.05
-        print(f'alpha level: {100 * alpha:.2f}%')
-
         # Plot.
         default_plots = config['defaults']['plot']
         for plot_config in config['plot']:
@@ -211,6 +208,9 @@ def main():
             filename = output_path / f'results_{dim}d' / plot_config['filename']
             utils.ensure_path(filename.parent)
             print(f'plotting: {filename}')
+
+            alpha = plot_config['alpha_level']
+            print(f'  alpha level: {100 * alpha:.2f}%')
 
             # Interpolate to high-resolution.
             timer.restart()
