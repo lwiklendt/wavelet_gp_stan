@@ -726,6 +726,17 @@ class GPFreqModel(GPModel):
 
             mu_ci = np.array([np.percentile(samples, q, axis=0) for q in (lower, upper)])
 
+            # Test for 0-crossing.
+            if not icpt:
+                ci_cross = np.diff(mu_ci > 0, axis=1)
+                if np.any(ci_cross):
+                    title = ax.get_title()
+                    print(f'    "{title}" ci crosses at {2**log2_freqs_cpm[np.where(ci_cross)[1]]} cpm')
+                # med_cross = np.diff(np.percentile(samples, 50, axis=0) > 0)
+                # if np.any(med_cross):
+                #     title = ax.get_title()
+                #     print(f'    "{title}" median crosses at {2**log2_freqs_cpm[np.where(med_cross)[0]]} cpm')
+
             facecolor_value = mcolors.rgb_to_hsv(ax.get_facecolor()[:3])[-1]
             if facecolor_value > 0.5:
                 linecolor = 'k'
