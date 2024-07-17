@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import tomllib
 import uuid
+import warnings
 
 import numpy as np
 import polars as pl
@@ -240,7 +241,7 @@ def assemble_table(config: dict, df: pl.DataFrame) -> AssembledTable:
     # Parse time columns.
     time_columns = config['data']['time_columns']
     for column in time_columns:
-        df = df.with_columns(pl.col(column).map_elements(time_to_seconds))
+        df = df.with_columns(pl.col(column).map_elements(time_to_seconds, return_dtype=pl.Float64))
 
     # Parse [time].
     time_variable = config['time']['name']
@@ -284,7 +285,7 @@ def assemble_table(config: dict, df: pl.DataFrame) -> AssembledTable:
                  variable_name=time_variable, value_name=time_value_column)
 
     # Strip off uuids in the categorical column.
-    df = df.with_columns(pl.col(time_variable).map_elements(lambda x: x[:-len(time_uuid)]))
+    df = df.with_columns(pl.col(time_variable).map_elements(lambda x: x[:-len(time_uuid)], return_dtype=pl.String))
 
     # Parse [chan]
     # Channels must be in the format "start-end", so just melt for now.
@@ -296,13 +297,14 @@ def assemble_table(config: dict, df: pl.DataFrame) -> AssembledTable:
                  variable_name=chan_variable, value_name=chan_value_column)
 
     # Drop missing records that were melted into a null.
-    null_times = df[time_value_column].map_elements(lambda x: x.is_null().all())
+    null_times = df[time_value_column].map_elements(lambda x: x.is_null().all(), return_dtype=pl.Boolean)
     null_chans = df[chan_value_column].is_null()
     nulls = null_times | null_chans
     df = df.filter(~nulls)
 
     # Parse chan_value_column from "start-end" to (start, end).
-    df = df.with_columns(pl.col(chan_value_column).map_elements(lambda x: [int(c) for c in x.split('-')]))
+    df = df.with_columns(pl.col(chan_value_column).map_elements(lambda x: [int(c) for c in x.split('-')],
+                                                                return_dtype=pl.List(pl.Int64)))
 
     # Combine filename, chan, and time to make a unit identifier which will be used to store wavelet data and
     # retrieve it for sampling.
@@ -445,15 +447,15 @@ def main():
         def load_recording():
             # load filename
             filename = (input_path / data_basename).with_suffix('.txt')
-            t, _, x = data.load_hrm_txt(filename)
+            _t, _, _x = data.load_hrm_txt(filename)
 
-            diff_t = np.diff(t)
-            dt = np.median(diff_t)
+            diff_t = np.diff(_t)
+            _dt = np.median(diff_t)
 
             nonlocal check_dt
             nonlocal filename_for_dt
             if check_dt is None:
-                check_dt = dt
+                check_dt = _dt
                 filename_for_dt = filename
 
             # Ensure sample rate is consistent throughout.
@@ -461,18 +463,18 @@ def main():
                 raise RuntimeError('Inconsistent sampling rate')
 
             # Ensure expected sampling rate.
-            if np.abs(dt / check_dt - 1.0) > 1e-6:
-                raise RuntimeError(f'Time-step in "{filename}" ({dt}) '
+            if np.abs(_dt / check_dt - 1.0) > 1e-6:
+                raise RuntimeError(f'Time-step in "{filename}" ({_dt}) '
                                    f'inconsistent with that in "{filename_for_dt}" ({check_dt})')
 
             # Ensure no nans.
-            if np.sum(np.isnan(x)) > 0:
+            if np.sum(np.isnan(_x)) > 0:
                 raise RuntimeError('There are NaNs in the pressures')
 
             # pre-process with baseline and synchronous anomaly removal
-            x = data.clean_pressures(x, sigma_samples=blr_sigma/dt, iters=blr_iters, sync_rem=sync_rem)
+            _x = data.clean_pressures(_x, sigma_samples=blr_sigma/_dt, iters=blr_iters, sync_rem=sync_rem)
 
-            return dt, t, x
+            return _dt, _t, _x
 
         # Later we test x for None to see if we need to load the data via load_recording()
         x = None
@@ -487,6 +489,11 @@ def main():
             # Skip if this unit already exists.
             if pkl_filename.exists():
                 print(f'{unit_i}/{nunits}:   {unit_id} (already exists as: {pkl_filename})')
+
+                # Calculate peak measures.
+                f, fp = utils.pkl_load(pkl_filename)
+                peak_measures[unit_id] = find_peaks(f, fp, freqs_cpm, phase_centres, wavelet_params)
+
                 continue
 
             # Ensure there is data for this unit.
@@ -519,11 +526,11 @@ def main():
 
             # Ensure we're within recording bounds.
             if sec_start < t[0]:
-                raise RuntimeError(f'Unit {unit_id} has start time at {sec_start}, but min is {t[0]} '
-                                   f'(diff={t[0] - sec_start})')
+                raise RuntimeError(f'Unit {unit_id} has start time at {datetime.timedelta(seconds=sec_start)}, '
+                                   f'but min is {datetime.timedelta(seconds=t[0])}')
             if sec_end > t[-1]:
-                raise RuntimeError(f'Unit {unit_id} has end time at {sec_end}, but max is {t[-1]} '
-                                   f'(diff={sec_end-t[-1]})')
+                raise RuntimeError(f'Unit {unit_id} has end time at {datetime.timedelta(seconds=sec_end)}, '
+                                   f'but max is {datetime.timedelta(seconds=t[-1])}')
 
             # Convert from supplied to normal zero-based end-exclusive indexing.
             match (chan_one_based_index, chan_end_inclusive):
@@ -553,35 +560,37 @@ def main():
 
     # Append to table for use in Stan.
     if 'nchan' not in df.columns:
-        df = df.with_columns(pl.col(table.chan_value_column).map_elements(lambda v: v[1] - v[0] + 1).alias('nchan'))
+        df = df.with_columns(pl.col(table.chan_value_column)
+                             .map_elements(lambda v: v[1] - v[0] + 1, return_dtype=pl.Int64).alias('nchan'))
     else:
         print(f'column "nchan" already exists in table, skipping', file=sys.stderr)
     if 'hours' not in df.columns:
-        df = df.with_columns(
-            pl.col(table.time_value_column).map_elements(lambda v: map_to_time_seconds(v) / 3600).alias('hours'))
+        df = df.with_columns(pl.col(table.time_value_column)
+                             .map_elements(lambda v: map_to_time_seconds(v) / 3600,
+                                           return_dtype=pl.Float64).alias('hours'))
     else:
         print(f'column "hours" already exists in table, skipping', file=sys.stderr)
     if 'minutes' not in df.columns:
-        df = df.with_columns(
-            pl.col(table.time_value_column).map_elements(lambda v: map_to_time_seconds(v) / 60).alias('minutes'))
+        df = df.with_columns(pl.col(table.time_value_column).
+                             map_elements(lambda v: map_to_time_seconds(v) / 60,
+                                          return_dtype=pl.Float64).alias('minutes'))
     else:
         print(f'column "minutes" already exists in table, skipping', file=sys.stderr)
     df = df.drop([table.chan_value_column, table.time_value_column])
 
-    # TODO peak measures are missing for precomputed since we don't pkl peaks.
-    # # Append peak measures.
-    # with warnings.catch_warnings():
-    #     # Polars does not correctly identify the mapping below, so filter the unnecessary warning.
-    #     warnings.filterwarnings('ignore', category=pl.exceptions.PolarsInefficientMapWarning)
-    #     for i, label in enumerate(['peak1d_freq', 'peak1d_power', 'peak2d_freq', 'peak2d_phase', 'peak2d_power']):
-    #         if label not in df.columns:
-    #             df = df.with_columns(pl.col(unit_id_col).map_elements(lambda u: peak_measures[u][i]).alias(label))
-    #         else:
-    #             print(f'column "{label}" already exists in table, skipping', file=sys.stderr)
+    # Append peak measures.
+    for i, label in enumerate(['peak1d_freq', 'peak1d_power', 'peak2d_freq', 'peak2d_phase', 'peak2d_power']):
+        if label not in df.columns:
+            df = df.with_columns(pl.col(unit_id_col).map_elements(
+                lambda u: peak_measures[u][i] if u in peak_measures else None,
+                return_dtype=pl.Float64).alias(label))
+        else:
+            print(f'column "{label}" already exists in table, skipping', file=sys.stderr)
 
     # Drop rows which have no processed data.
     unit_data_exists = df[unit_id_col]
-    unit_exists = unit_data_exists.map_elements(lambda u: (output_path / 'data' / u).with_suffix('.pkl').exists())
+    unit_exists = unit_data_exists.map_elements(lambda u: (output_path / 'data' / u).with_suffix('.pkl').exists(),
+                                                return_dtype=pl.Boolean)
     dropped = df.filter(~unit_exists)
     if len(dropped) > 0:
         print(f'dropped non-existing units:')
