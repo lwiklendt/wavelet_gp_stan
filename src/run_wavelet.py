@@ -306,11 +306,22 @@ def assemble_table(config: dict, df: pl.DataFrame) -> AssembledTable:
     df = df.with_columns(pl.col(chan_value_column).map_elements(lambda x: [int(c) for c in x.split('-')],
                                                                 return_dtype=pl.List(pl.Int64)))
 
+    chan_value_uuid_column = f'channels_value_{chan_uuid}'
+    df = df.with_columns(pl.col(chan_value_column)
+                         .map_elements(lambda pair: f'c{pair[0]}_c{pair[1]}', return_dtype=str)
+                         .alias(chan_value_uuid_column))
+    time_value_uuid_column = f'time_value_{time_uuid}'
+    df = df.with_columns(pl.col(time_value_column)
+                         .map_elements(lambda pair: f't{pair[0]}_t{pair[1]}'.replace('.', '_'), return_dtype=str)
+                         .alias(time_value_uuid_column))
+
     # Combine filename, chan, and time to make a unit identifier which will be used to store wavelet data and
     # retrieve it for sampling.
     filenames_column = config['data']['filenames_column']
-    df = df.with_columns(pl.concat_str(pl.col(filenames_column, chan_variable, time_variable), separator='_').alias(
-        config['data']['unit_id_column']))
+    df = df.with_columns(pl.concat_str(pl.col(filenames_column,
+                                              chan_variable, chan_value_uuid_column,
+                                              time_variable, time_value_uuid_column),
+                                       separator='_').alias(config['data']['unit_id_column']))
 
     return AssembledTable(df=df, chan_value_column=chan_value_column, time_value_column=time_value_column)
 
