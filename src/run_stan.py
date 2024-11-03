@@ -234,6 +234,14 @@ def main():
                 decs[dec] = model.fit(samples_hr, 'eta', data=defn)
             print('')
 
+            # Convert to freq-freq
+            if plot_config.get('freq_freq', False):
+                force_diff = True
+                for k, v in decs.items():
+                    decs[k] = v[:, :, None] - v[:, None, :]
+            else:
+                force_diff = False
+
             eqns = plot_config['equations']
             if 'titles' in plot_config:
                 titles = plot_config['titles']
@@ -243,7 +251,7 @@ def main():
 
             # Plot and save.
             print('  rendering')
-            fig = model.plot(freqs_cpm_hr, decs, eqns, titles=titles, force_diff=False,  # TODO implement force_diff
+            fig = model.plot(freqs_cpm_hr, decs, eqns, titles=titles, force_diff=force_diff,
                              icpt_tx=icpt_tx, icpt_value_label=icpt_label, alpha=alpha, peaks=peaks,
                              suptitle=config_filename)
             fig.savefig(filename, dpi=plot_config.get('dpi', 150))
