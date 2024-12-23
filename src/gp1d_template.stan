@@ -29,14 +29,14 @@ data {
   
   // {v} (1|{nlev}): {term}
   vector[N] Z_{v};
-  int<lower=1, upper={nlev}> l_{v}[N];
+  array[N] int<lower=1, upper={nlev}> l_{v};
   
   /*** end data onecol ***/
   /*** start data multicol ***/
   
   // {v} ({ncol}|{nlev}): {term}
   matrix[N,{ncol}] Z_{v};
-  int<lower=1, upper={nlev}> l_{v}[N];
+  array[N] int<lower=1, upper={nlev}> l_{v};
   
   /*** end data multicol ***/
 }

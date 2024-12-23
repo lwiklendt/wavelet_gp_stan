@@ -450,14 +450,50 @@ class GPModel(ABC):
         fig.tight_layout()
         return fig
 
-    def plot_coeffs(self, samples, outpath):
+    def plot_coeffs(self, samples, outpath, nchains=1):
 
         # model.freqs is on the log2 scale
         if self.freqs is None:
             raise RuntimeError('set_data must be called on model before calling plot_coeffs')
         freqs_cpm = 2 ** self.freqs
 
-        # TODO plot lambdas
+        # plot other parameters
+        params = set(self.get_params_fe()) - set(['beta', 'gamma', 'noise'])
+        for param in params:
+            x = samples[param]
+            if len(x.shape) > 2:
+                if param == 'lambda_beta':
+                    coeffs = self.fe_mu_coeffs
+                elif param == 'lambda_gamma':
+                    coeffs = self.fe_noise_coeffs
+                else:
+                    print(f'not yet implemented plotting parameter {param} of shape {x.shape}')
+                    continue
+
+                nr = int(np.ceil(np.sqrt(len(coeffs))))
+                nc = int(np.ceil(len(coeffs) / nr))
+                fig, ax = plt.subplots(nr, nc, figsize=(3 * nr + 1, 2.5 * nc + 1))
+                for i, coeff in enumerate(coeffs):
+                    ri = i % nr
+                    ci = i // nr
+                    ax[ri, ci].scatter(x[:, 0, ri], x[:, 1, ri], c='b', s=2, linewidths=0, alpha=0.01)
+                    ax[ri, ci].set_title(coeff)
+                fig.tight_layout()
+                fig.savefig(outpath / f'{param}.png', dpi=150)
+                plt.close(fig)
+
+            else:
+                fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+                if len(x.shape) == 1:
+                    ax.hist(np.reshape(x, (x.shape[0] // nchains, nchains), order='F'),
+                            bins=50, histtype='bar', stacked=True)
+                else:
+                    # TODO reshape and scatter with different color per chain, here and above.
+                    ax.scatter(x[:, 0], x[:, 1], c='b', s=2, linewidths=0, alpha=0.01)
+                ax.set_title(param)
+                fig.tight_layout()
+                fig.savefig(outpath / f'{param}.png', dpi=150)
+                plt.close(fig)
 
         # plot betas
         fig = self.plot(freqs_cpm, samples['beta'], self.fe_mu_coeffs, offset_eta=samples['offset_eta'])
@@ -1025,7 +1061,11 @@ def make_design_matrices(df, fe_formula=None, re_formulas=None):
     fe_formula = fe_formula or '1'
     re_formulas = re_formulas or []
 
-    dmat_fe = formulaic.model_matrix(fe_formula, df)
+    # TODO we want structural zeros: https://github.com/matthewwardrop/formulaic/issues/152
+    #  This is very difficult due to lack of API documentation and methods to facilitate, so instead work around it
+    #  by ignoring zeros in the Stan model.
+
+    dmat_fe = formulaic.model_matrix(fe_formula, df, ensure_full_rank=True, na_action='raise')
     x = np.asarray(dmat_fe)
 
     dmats_re = OrderedDict()
@@ -1071,6 +1111,8 @@ def simplify_column_names(column_name, simplify_terms=True):
                 else:
                     labels.append(term)
             column_name = '_'.join(labels)
+        else:
+            column_name.replace(':', '\n')
     return column_name
 
 

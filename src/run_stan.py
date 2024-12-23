@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import tomllib
 import uuid
+import shutil
 
 import numpy as np
 import polars as pl
@@ -41,6 +42,9 @@ def main():
     else:
         output_path = Path(config_filename.stem)
     utils.ensure_path(output_path)
+
+    # Copy config file (noting we're already in config_filename's folder).
+    shutil.copyfile(config_filename.name, output_path / config_filename.name)
 
     # Read params written in wavelet step.
     from_wavelet_params_filename = input_path / 'params.toml'
@@ -175,12 +179,8 @@ def main():
         model.dmat_mu.__wrapped__.to_csv(output_path / f'design_mu.csv', index=False)
         model.dmat_noise.__wrapped__.to_csv(output_path / f'design_noise.csv', index=False)
         with open(output_path / f'design_columns.txt', 'w') as f:
-            print('dmat_mu:', file=f)
-            for c in model.dmat_mu.model_spec.column_names:
-                print(f'  {c}', file=f)
-            print('dmat_noise:', file=f)
-            for c in model.dmat_noise.model_spec.column_names:
-                print(f'  {c}', file=f)
+            print(f'dmat_mu:\n{(model.dmat_mu != 0).sum()}\n\n', file=f)
+            print(f'dmat_noise:\n{(model.dmat_noise != 0).sum()}', file=f)
 
         # Perform sampling, or retrieve samples if nothing has changed.
         samples_path = output_path / f'samples_{dim}d'
@@ -191,7 +191,7 @@ def main():
 
         if is_resampled:
             timer.restart()
-            model.plot_coeffs(samples, samples_path)
+            model.plot_coeffs(samples, samples_path, config['stan']['chains'])
             print(f'Plot coeffs elapsed: {timer}')
 
         # Choose intercept label.

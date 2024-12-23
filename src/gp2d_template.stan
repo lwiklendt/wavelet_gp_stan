@@ -49,14 +49,14 @@ data {
   
   // {v} (1|{nlev}): {term}
   vector[N] Z_{v};
-  int<lower=1, upper={nlev}> l_{v}[N];
+  array[N] int<lower=1, upper={nlev}> l_{v};
   
   /*** end data onecol ***/
   /*** start data multicol ***/
   
   // {v} ({ncol}|{nlev}): {term}
   matrix[N,{ncol}] Z_{v};
-  int<lower=1, upper={nlev}> l_{v}[N];
+  array[N] int<lower=1, upper={nlev}> l_{v};
   
   /*** end data multicol ***/
 }
@@ -66,8 +66,8 @@ transformed data {
   real nugget = 1e-6;
   matrix[F,F] I_f = diag_matrix(rep_vector(1, F));
   matrix[H,H] I_h = diag_matrix(rep_vector(1, H));
-  matrix[F,F] fd =           fabs(rep_matrix(f, F) - rep_matrix(f', F));
-  matrix[H,H] hd = sin(0.5 * fabs(rep_matrix(h, H) - rep_matrix(h', H)));
+  matrix[F,F] fd =           abs(rep_matrix(f, F) - rep_matrix(f', F));
+  matrix[H,H] hd = sin(0.5 * abs(rep_matrix(h, H) - rep_matrix(h', H)));
   real mean_y = mean(y);
 }
 

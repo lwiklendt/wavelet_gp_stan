@@ -128,6 +128,8 @@ def sample(src_stan_code: str,
     if compile == 'force':
         print('cached compile_kwargs missing or different')
 
+    # TODO improve logging so that we can see each chain's status.
+
     # Setup logging, DEBUG by default and INFO to stdout.
     logger = logging.getLogger('cmdstanpy')
     logger.setLevel(logging.DEBUG)
@@ -332,11 +334,13 @@ def plot_ranks(result, num_worst=10, num_best=5, nbins=None):
     num_worst = min(num_worst, len(df_summary))
     num_best = min(num_best, len(df_summary))
 
-    df_worst = df_summary.sort_values(by='N_Eff').iloc[:num_worst]
-    df_best = df_summary.sort_values(by='N_Eff', ascending=False).iloc[:num_best]
+    neff_column = 'ESS_tail'
+
+    df_worst = df_summary.sort_values(by=neff_column).iloc[:num_worst]
+    df_best = df_summary.sort_values(by=neff_column, ascending=False).iloc[:num_best]
     df_ranks = pd.concat((df_worst, df_best))
     nchains = result.chains
-    neffs = df_summary['N_Eff'].values
+    neffs = df_summary[neff_column].values
     rhats = df_summary['R_hat'].values
 
     draws_pd = result.draws_pd()
@@ -353,14 +357,14 @@ def plot_ranks(result, num_worst=10, num_best=5, nbins=None):
     fig = plt.figure(figsize=(2 * nchains + 1, 2 * (len(df_ranks) + 2) + 1))
     gs = gridspec.GridSpec(len(df_ranks) + 2, nchains)
 
-    for i, (column_name, neff) in enumerate(zip(df_ranks.index, df_ranks['N_Eff'])):
+    for i, (column_name, neff) in enumerate(zip(df_ranks.index, df_ranks[neff_column])):
         print(f'plotting {column_name} {i + 1}/{len(df_ranks)}', flush=True)
         x = draws_pd[column_name].values
         ranks = scipy.stats.rankdata(x)
         for j, r in enumerate(np.split(ranks, nchains)):
             ax = fig.add_subplot(gs[i, j], facecolor='0.95')
             if j == 0:
-                ax.set_ylabel(f'{column_name}\nneff={int(neff)}')
+                ax.set_ylabel(f'{column_name}\n{neff_column}={int(neff)}')
             ax.hist(r, bins=bin_edges, zorder=10)
             ax.axhline(len(r) / nbins, c='k', ls=':', zorder=20)
             for spine in ax.spines.values():
@@ -368,7 +372,7 @@ def plot_ranks(result, num_worst=10, num_best=5, nbins=None):
             ax.tick_params(bottom=False, labelbottom=False, left=False, labelleft=(j == 0))
 
     # N_Eff
-    print(f'plotting n_eff', flush=True)
+    print(f'plotting {neff_column}', flush=True)
     ax = fig.add_subplot(gs[-2, :])
     ax.hist(neffs[np.isfinite(neffs)], bins=100)
     ax.set_xlabel('Number of effective samples')

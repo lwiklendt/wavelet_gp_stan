@@ -469,7 +469,7 @@ class GPModel(ABC):
         fig.tight_layout()
         return fig
 
-    def plot_coeffs(self, samples, outpath):
+    def plot_coeffs(self, samples, outpath, nchains=1):
 
         # model.freqs is on the log2 scale
         if self.freqs is None:
@@ -999,8 +999,9 @@ def make_design_matrices(df, fe_formula=None, re_formulas=None):
     fe_formula = fe_formula or '1'
     re_formulas = re_formulas or []
 
-    # TODO formulaic automatically computes re model matrices from the single formula, so no need to
-    #   seperate them?
+    # TODO we want structural zeros: https://github.com/matthewwardrop/formulaic/issues/152
+    #  This is very difficult due to lack of API documentation and methods to facilitate, so instead work around it
+    #  by ignoring zeros in the Stan model.
 
     dmat_fe = formulaic.model_matrix(fe_formula, df, ensure_full_rank=True, na_action='raise')
     x = np.asarray(dmat_fe)
@@ -1048,6 +1049,8 @@ def simplify_column_names(column_name, simplify_terms=True):
                 else:
                     labels.append(term)
             column_name = '_'.join(labels)
+        else:
+            column_name.replace(':', '\n')
     return column_name
 
 
